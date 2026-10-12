@@ -1771,6 +1771,7 @@ main() {
     files_from_base
     remove_updater
     if donor_is_eu; then eu_fixes; fi
+    rom_branding   # "by xiaomi.eu" di About phone -> "by $ROM_AUTHOR" (ROM_AUTHOR kosong = mati)
     rm -rf "${B_FS:?}/product" "$B_FS/config/product_"*
     rm -f "$B_IMG/product.img"
     patch_vendor_fstab

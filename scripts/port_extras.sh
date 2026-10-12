@@ -11,6 +11,7 @@
 #    millet_fix                 ro.millet.netlink disamakan dengan marble
 #    unlock_device_features     nyalakan fitur tambahan di product/etc/device_features/*.xml
 #    files_from_base            bootanimation, VoiceTrigger (base A15), props ringan (HyperOS-Port-Python)
+#    rom_branding               "by xiaomi.eu" di About phone -> "by $ROM_AUTHOR" (overlay RRO)
 # =============================================================================
 
 AOD_FIX=${AOD_FIX:-auto}            # auto | true | false
@@ -197,5 +198,51 @@ files_from_base() {
     if [[ -z $(get_prop "$B_FS/product/etc/build.prop" ro.miui.cust_erofs) ]]; then
         set_prop "$P_FS/product/etc/build.prop" ro.miui.cust_erofs 0
         log "props: ro.miui.cust_erofs=0"
+    fi
+}
+
+# ------------------------------------------------------------------ Branding
+# Teks "by xiaomi.eu" di About phone -> "by $ROM_AUTHOR". APK app (Settings dll) TIDAK diubah
+# (tanda tangan platform tetap): string-nya ditimpa overlay RRO baru di product/overlay.
+# Kalau teksnya ada di APK overlay, overlay itu dipatch langsung lalu ditandatangani ulang.
+ROM_AUTHOR=${ROM_AUTHOR:-}                                    # kosong = mati
+BRANDING_FROM=${BRANDING_FROM:-xiaomi.eu}
+BRANDING_MATCH=${BRANDING_MATCH:-'(?i)\bby\s+xiaomi\.eu\b'}   # hanya string yang cocok regex ini yang diganti
+
+rom_branding() {
+    local lf="$WORK/branding.log" out="$WORK/branding" kind a b c apk d o cnt n=0
+    local -a args
+    if [[ -z $ROM_AUTHOR ]]; then log "Branding: ROM_AUTHOR kosong, dilewati"; return 0; fi
+    args=(--needle "$BRANDING_FROM" --match "$BRANDING_MATCH" --author "$ROM_AUTHOR")
+    rm -rf "$out"; mkdir -p "$out"
+    if ! python3 "$SCRIPT_DIR/rom_branding.py" --root "$P_FS" --out "$out" "${args[@]}" > "$lf" 2>&1; then
+        tail -n 5 "$lf" >&2; warn "Branding: scan gagal, dilewati"; return 0
+    fi
+    while IFS= read -r a; do log "Branding: $a"; done < <(grep -E '^(HIT|SKIP|ERR)' "$lf" | head -n 40 || true)
+
+    while read -r kind a b c <&3; do
+        if [[ $kind == PATCH ]]; then
+            apk="$P_FS/$a"; d="$WORK/branding_dec"; o="$WORK/branding_patched.apk"
+            rm -rf "$d" "$o"
+            if ! apk_tool d "$apk" "$d"; then tail -n 5 "$WORK/apktool.log" >&2; warn "Branding: decode $a gagal"; continue; fi
+            cnt=$(python3 "$SCRIPT_DIR/rom_branding.py" --patch-decoded "$d" "${args[@]}" | awk '$1 == "PATCHED" {print $2}')
+            if [[ ${cnt:-0} -eq 0 ]]; then warn "Branding: teks tidak ketemu di hasil decode $a"; continue; fi
+            if ! apk_tool b "$d" "$o"; then tail -n 5 "$WORK/apktool.log" >&2; warn "Branding: build ulang $a gagal, dibiarkan"; continue; fi
+            apk_sign "$o"; cp -f "$o" "$apk"
+            ok "Branding: $a dipatch ($cnt string) -> '$ROM_AUTHOR'"; n=$((n + 1))
+        else  # OVERLAY <target> <dir> <jumlah>
+            o="$WORK/$(basename "$b").apk"; rm -f "$o"
+            if ! apk_tool b "$b" "$o"; then tail -n 5 "$WORK/apktool.log" >&2; warn "Branding: build overlay $a gagal"; continue; fi
+            apk_sign "$o"
+            mkdir -p "$P_FS/product/overlay"
+            cp -f "$o" "$P_FS/product/overlay/"; chmod 0644 "$P_FS/product/overlay/${o##*/}"
+            ok "Branding: overlay baru product/overlay/${o##*/} -> $a ($c string) -> '$ROM_AUTHOR'"; n=$((n + 1))
+        fi
+    done 3< <(awk '$1 == "PATCH" || $1 == "OVERLAY"' "$lf")
+
+    if [[ $n -eq 0 ]]; then
+        python3 "$SCRIPT_DIR/rom_branding.py" --root "$P_FS" --out "$out" --dex "${args[@]}" > "$lf.dex" 2>&1 || true
+        while IFS= read -r a; do log "Branding: $a"; done < <(grep '^DEX' "$lf.dex" | head -n 20 || true)
+        warn "Branding: '$BRANDING_FROM' (regex $BRANDING_MATCH) tidak ditemukan di resource APK -> tidak diganti. Baris 'DEX' di atas = teks tertanam di kode, tidak bisa lewat overlay"
     fi
 }
