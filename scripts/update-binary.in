@@ -58,6 +58,7 @@ ui_print " "
 ui_print "=========================================="
 ui_print " HyperOS $PORT_VERSION"
 ui_print " Port untuk $TARGET (recovery flashable)"
+[ -n "@ROM_AUTHOR@" ] && ui_print " by @ROM_AUTHOR@"
 ui_print "=========================================="
 ui_print " "
 

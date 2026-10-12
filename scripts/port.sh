@@ -1523,6 +1523,25 @@ installer_no_wipe() { # pkg
 }
 
 # pakai META-INF ROM base apa adanya, lalu cek semua file yang dirujuk installer ada di paket
+# installer_branding <pkg> <versi>: banner "by $ROM_AUTHOR" di awal & akhir updater-script (edify ui_print)
+installer_branding() {
+    local us="$1/META-INF/com/google/android/updater-script" who=${ROM_AUTHOR//[\"\\]/} ver=${2//[\"\\]/} tmp
+    [[ -n $who ]] || return 0
+    if [[ ! -f $us ]] || ! grep -qE 'package_(extract|unsparse)_file' "$us"; then
+        log "installer: updater-script edify tidak ada, banner '$who' dilewati"; return 0
+    fi
+    tmp="$us.new"
+    {
+        printf 'ui_print(" ");\nui_print("==========================================");\n'
+        printf 'ui_print(" HyperOS %s port for %s");\nui_print(" by %s");\n' "$ver" "$TARGET_DEVICE" "$who"
+        printf 'ui_print("==========================================");\nui_print(" ");\n'
+        cat "$us"
+        printf '\nui_print(" ");\nui_print("- Done. HyperOS port by %s");\n' "$who"
+    } > "$tmp"
+    mv -f "$tmp" "$us"
+    ok "installer: banner 'by $who' ditambahkan ke updater-script"
+}
+
 apply_base_installer() { # pkg
     local pkg=$1 ref missing="" unref="" f n=0
     local us="$pkg/META-INF/com/google/android/updater-script" ub="$pkg/META-INF/com/google/android/update-binary"
@@ -1596,6 +1615,7 @@ write_recovery_pkg() {
         -e "s|@FLASH_RECOVERY@|$flash_rec|g" \
         -e "s|@AB_IMAGES@|${ab[*]}|g" \
         -e "s|@NONAB_IMAGES@|$nonab_found|g" \
+        -e "s|@ROM_AUTHOR@|${ROM_AUTHOR//[\"|\\]/}|g" \
         "$SCRIPT_DIR/update-binary.in" > "$ub"
     if grep -q '@[A-Z_]*@' "$ub"; then die "placeholder update-binary belum terisi"; fi
     chmod 0755 "$ub"
@@ -1845,6 +1865,7 @@ main() {
         rm -rf "$pkg/META-INF"; cp -a "$WORK/base_META-INF" "$pkg/META-INF"
         if [[ -z $RECOVERY_IMG ]]; then strip_recovery_refs "$pkg"; fi
         apply_base_installer "$pkg"
+        installer_branding "$pkg" "$port_ver"
     else
         if [[ $RECOVERY_SUPER == zst ]]; then
             log "kompres super.img -> super.img.zst"
