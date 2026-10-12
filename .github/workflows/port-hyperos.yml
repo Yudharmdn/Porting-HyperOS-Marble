@@ -109,7 +109,7 @@ env:
   # dari ROM base: overlay = Devices* + Aosp/Miui framework, Settings, biometrik, telephony (seperti toraidl)
   REPLACE_FROM_BASE: "device_features displayconfig overlay camera misound biometric"
   EU_SYSTEMSERVER_PATCH: "true"  # donor xiaomi.eu: kosongkan constructor SystemServerImpl (miui-services.jar), seperti toraidl
-  DONOR_APKS: "Settings"        # SEMENTARA: APK donor asli (nama APK/file, spasi) -> artifact donor-apks. Kosong = mati
+  DONOR_APKS: ""        # SEMENTARA: APK donor asli (nama APK/file, spasi) -> artifact donor-apks. Kosong = mati
   ROM_AUTHOR: "Yudharn"         # About phone: "by xiaomi.eu" -> "by Yudharn" lewat overlay (kosong = mati)
   DEBLOAT_PRESET: none         # debloat hanya dari debloat_packages.txt (safe = + hapus semua data-app)
   DEBLOAT_SAFE_KEEP: "MIUIGallery"   # folder data-app yang dipertahankan (pisah spasi)
