@@ -21,6 +21,7 @@ After merging them, `scripts/port.sh` patches the parts that usually stop a port
 - **Updater removed:** the donor's updater app would offer OTAs built for another phone, and installing one on marble can brick it.
 - **From [HyperOS-Port-Python](https://github.com/toraidl/HyperOS-Port-Python):** the carrier config and SystemUI device overlays, bootanimation, and on an Android 15 base with a HyperOS 3 donor, marble's VoiceTrigger (the donor one crashes there). `ro.miui.density.primaryscale` is dropped and `ro.miui.cust_erofs` is set. If the overlay still points AOD at `com.miui.aod`, it is redirected to the doze service in the donor's SystemUI.
 - **xiaomi.eu donors:** like toraidl, the constructor of `SystemServerImpl` in `miui-services.jar` is emptied so it only calls its parent class, and `device_info.json` comes from marble. The original constructor is printed in the build log so you can see what was removed.
+- **Branding:** the "by xiaomi.eu" line under the HyperOS logo in About phone becomes "by Yudharn" (`ROM_AUTHOR`). Settings itself is left untouched: the text is replaced by a small overlay, so no system app has to be re-signed. Links such as xiaomi.eu URLs are not changed.
 - **VINTF:** the marble vendor is FCM level 6 (Android 12), which Android 17 no longer knows about. The script copies `compatibility_matrix.6.xml` from the base system into `/system/etc/vintf/` of the port (that's the framework side, the VINTF files in `/vendor` and `/odm` are left untouched). It also checks the other direction, making sure everything the vendor's matrix asks for is provided by the framework.
 - **VNDK:** the VNDK v32 APEX is copied from the base into `/system_ext/apex`, and `vendor-ndk 32` is declared in a framework manifest fragment, since newer Android donors don't ship either anymore.
 - **Linker:** every library the vendor/odm binaries need is checked one by one, and the result shows up in the log.
@@ -198,6 +199,7 @@ scripts/sparse_split.py              splits super into super.img.0..8
 scripts/apk_index.py                 reads package names from APKs
 scripts/apk_static_lib.py            reads static shared library info (Trichrome) from an APK
 scripts/apk_bundle.py                unpacks an .apkm/.apks/.xapk bundle (base + splits)
+scripts/rom_branding.py              finds "by xiaomi.eu" in app resources and builds the overlay that renames it
 scripts/apk_perms.py                 lists the permissions an APK asks for (builds the privapp allowlist)
 scripts/update-binary.in             fallback installer (when not using the base META-INF)
 debloat_packages.txt                 the debloat list
