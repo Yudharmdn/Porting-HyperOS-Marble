@@ -208,17 +208,41 @@ files_from_base() {
 ROM_AUTHOR=${ROM_AUTHOR:-}                                    # kosong = mati
 BRANDING_FROM=${BRANDING_FROM:-xiaomi.eu}
 BRANDING_MATCH=${BRANDING_MATCH:-'(?i)\bby\s+xiaomi\.eu\b'}   # hanya string yang cocok regex ini yang diganti
+BRANDING_BUILD_HOST=${BRANDING_BUILD_HOST:-true}              # ro.build.host -> $ROM_AUTHOR ("by <host>" di About phone)
+
+# branding_build_host: ro.build.host -> $ROM_AUTHOR. 0 = diubah, 1 = tidak
+branding_build_host() {
+    local f old who=${ROM_AUTHOR//[|&\\]/} n=0
+    is_true "$BRANDING_BUILD_HOST" || { log "Branding: ro.build.host tidak diubah (BRANDING_BUILD_HOST=false)"; return 1; }
+    # anti-port xiaomi.eu (SystemServerImpl di miui-services.jar) mengecek digest ro.build.host:
+    # host diganti hanya kalau cek itu sudah dibuang, kalau tidak -> reboot terus
+    if donor_is_eu && [[ ${EU_SS_OK:-0} != 1 ]]; then
+        warn "Branding: SystemServerImpl xiaomi.eu tidak terpatch -> ro.build.host TIDAK diubah (anti-port memakai host ini, bisa bootloop)"
+        return 1
+    fi
+    while IFS= read -r -d '' f; do
+        old=$(get_prop "$f" ro.build.host)
+        [[ -n $old && $old != "$who" ]] || continue
+        sed -i "s|^ro\.build\.host=.*|ro.build.host=${who}|" "$f"
+        ok "Branding: ${f#"$P_FS"/}: ro.build.host '$old' -> '$who'"; n=$((n + 1))
+    done < <(find "$P_FS" -type f -name '*.prop' -print0 2>/dev/null)
+    if [[ $n -eq 0 ]]; then log "Branding: ro.build.host tidak ditemukan di build.prop port"; return 1; fi
+    return 0
+}
 
 rom_branding() {
     local lf="$WORK/branding.log" out="$WORK/branding" kind a b c apk d o cnt n=0
     local -a args
     if [[ -z $ROM_AUTHOR ]]; then log "Branding: ROM_AUTHOR kosong, dilewati"; return 0; fi
+    # Settings xiaomi.eu menyusun baris itu di kode: "\nby " + SystemProperties.get("ro.build.host")
+    # (MiuiAboutPhoneUtils.getMiuiVersionInCard) -> cukup ganti ro.build.host
+    if branding_build_host; then n=$((n + 1)); fi
     args=(--needle "$BRANDING_FROM" --match "$BRANDING_MATCH" --author "$ROM_AUTHOR")
     rm -rf "$out"; mkdir -p "$out"
     if ! python3 "$SCRIPT_DIR/rom_branding.py" --root "$P_FS" --out "$out" "${args[@]}" > "$lf" 2>&1; then
         tail -n 5 "$lf" >&2; warn "Branding: scan gagal, dilewati"; return 0
     fi
-    while IFS= read -r a; do log "Branding: $a"; done < <(grep -E '^(FMT|HIT|SKIP|ERR)' "$lf" | head -n 40 || true)
+    while IFS= read -r a; do log "Branding: $a"; done < <(grep -E '^(FMT|SKIP|ERR)|^HIT .* -> ' "$lf" | head -n 40 || true)
 
     while read -r kind a b c <&3; do
         if [[ $kind == PATCH ]]; then

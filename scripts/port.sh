@@ -879,6 +879,7 @@ donor_is_eu() {
 # langkah khusus donor xiaomi.eu, mengikuti toraidl/hyperos_port (is_eu_rom):
 # - constructor SystemServerImpl di miui-services.jar dikosongkan (hanya memanggil superclass)
 # - device_info.json (halaman "Tentang ponsel") diambil dari base
+# shellcheck disable=SC2034  # EU_SS_OK dibaca branding_build_host (port_extras.sh)
 eu_fixes() {
     local jar api res line bj sj
     log "donor xiaomi.eu terdeteksi -> langkah khusus xiaomi.eu"
@@ -904,6 +905,7 @@ eu_fixes() {
     case $res in
         patched*)
             ok "xiaomi.eu: ${jar#"$P_FS"/}: constructor SystemServerImpl dikosongkan (${res#patched })"
+            EU_SS_OK=1
             # odex/vdex prebuilt dibuat dari dex LAMA: checksum tidak cocok lagi -> dibuang,
             # ART memakai dex di jar (lalu dikompilasi ulang otomatis oleh odrefresh)
             local o
@@ -911,7 +913,7 @@ eu_fixes() {
                 rm -f "$o"; log "xiaomi.eu: ${o#"$P_FS"/} dibuang (dibuat dari miui-services.jar lama)"
             done < <(find "$(dirname "$jar")/oat" -type f -name 'miui-services.*' -print0 2>/dev/null || true)
             ;;
-        already*) ok "xiaomi.eu: SystemServerImpl sudah minimal, tidak perlu patch" ;;
+        already*) ok "xiaomi.eu: SystemServerImpl sudah minimal, tidak perlu patch"; EU_SS_OK=1 ;;
         *) warn "xiaomi.eu: patch SystemServerImpl gagal (${res:-tanpa hasil}) -> risiko bootloop, lihat log" ;;
     esac
     rm -rf "$WORK/smali_ss"
