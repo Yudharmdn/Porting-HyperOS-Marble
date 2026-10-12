@@ -1632,6 +1632,25 @@ write_recovery_pkg() {
     log "recovery : $( [[ $flash_rec == true ]] && echo "diganti (RECOVERY_IMG)" || echo "tidak di-flash (recovery HP dipertahankan)")"
 }
 
+# export_donor_apks: SEMENTARA - salin APK/JAR donor asli (sebelum dipatch) ke $WORK/donor_apks,
+# diupload workflow sebagai artifact terpisah untuk dianalisa/diedit. DONOR_APKS kosong = mati.
+DONOR_APKS=${DONOR_APKS:-}
+export_donor_apks() {
+    local name f rel dst="$WORK/donor_apks" n=0
+    [[ -n $DONOR_APKS ]] || return 0
+    rm -rf "$dst"
+    for name in $DONOR_APKS; do
+        while IFS= read -r -d '' f; do
+            rel=${f#"$P_FS"/}
+            mkdir -p "$dst/$(dirname "$rel")"; cp -f "$f" "$dst/$rel"; n=$((n + 1))
+        done < <(find "$P_FS" -path '*/oat' -prune -o -type f \( -name "$name.apk" -o -name "$name" \) -print0 2>/dev/null)
+    done
+    if [[ $n -eq 0 ]]; then warn "DONOR_APKS: tidak ada file yang cocok ($DONOR_APKS)"; return 0; fi
+    chmod -R a+rX "$dst"
+    ok "DONOR_APKS: $n file donor asli -> artifact donor-apks ($(du -sh "$dst" | cut -f1))"
+    find "$dst" -type f | sed "s|^$dst/|    |"
+}
+
 # ================================================================== MAIN
 main() {
     [[ $RECOVERY_SUPER == raw || $RECOVERY_SUPER == zst ]] || die "RECOVERY_SUPER harus raw atau zst"
@@ -1736,6 +1755,7 @@ main() {
         log "ekstrak port $p"; extract_img "$P_IMG/$p.img" "$P_FS"; rm -f "$P_IMG/$p.img"
     done
     dfree
+    export_donor_apks   # sementara: APK donor asli -> artifact (DONOR_APKS)
     group_end
 
     # ---------------- 4. PATCH

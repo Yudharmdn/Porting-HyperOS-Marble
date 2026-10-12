@@ -161,8 +161,6 @@ progress 1.0
 rm -rf "$TMPD"
 ui_print " "
 ui_print "=========================================="
-ui_print " Selesai!"
-ui_print " WAJIB: Wipe > Format Data (ketik yes)"
-ui_print " lalu Reboot > System"
+ui_print " Selesai! Reboot > System"
 ui_print "=========================================="
 exit 0
