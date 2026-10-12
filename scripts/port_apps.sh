@@ -9,7 +9,7 @@
 #    CAMERA_APK      -> com.android.camera   (Camera 6.7.000070.0)    product/priv-app/MiuiCamera
 #
 #  APPS_FROM_URL=false mematikan semua. URL dikosongkan (GALLERY_APK="") = lewati app itu saja.
-#  Boleh .apk atau bundle (.apkm/.xapk/.apks, hanya base.apk yang dipakai).
+#  Boleh .apk atau bundle (.apkm/.xapk/.apks, base + semua split dipasang).
 #
 #  Cara kerja per app:
 #    - folder app yang paketnya sama di ROM port dicari lewat nama package (bukan nama folder),
@@ -91,28 +91,13 @@ apps_install() {
 
     src=$(fetch "$url" "$WORK/dl" "app_$label")
     tmp="$WORK/apps/$label"; rm -rf "$tmp"; mkdir -p "$tmp"
-    kind=$(python3 - "$src" "$tmp/app.apk" <<'PY'
-import sys, zipfile
-src, out = sys.argv[1], sys.argv[2]
-try:
-    z = zipfile.ZipFile(src)
-except Exception:
-    print("invalid"); raise SystemExit
-names = z.namelist()
-if "AndroidManifest.xml" in names:
-    open(out, "wb").write(open(src, "rb").read()); print("apk")
-elif "base.apk" in names:
-    open(out, "wb").write(z.read("base.apk")); print("bundle")
-else:
-    print("invalid")
-PY
-)
-    case $kind in
+    kind=$(python3 "$SCRIPT_DIR/apk_bundle.py" "$src" "$tmp" base)
+    case ${kind%% *} in
         apk)    ;;
-        bundle) log "Apps: $label berupa bundle, hanya base.apk yang dipakai (tanpa split bahasa/dpi)" ;;
+        bundle) log "Apps: $label berupa bundle: base + ${kind#* } split ikut dipasang" ;;
         *)      warn "Apps: $label bukan APK/bundle valid ($url), dilewati"; rm -rf "$tmp"; return 0 ;;
     esac
-    apk="$tmp/app.apk"
+    apk="$tmp/base.apk"
     pkg=$(python3 "$SCRIPT_DIR/apk_index.py" --apk "$apk")
     if [[ -z $pkg ]]; then warn "Apps: package $label tidak terbaca dari AndroidManifest, dilewati"; rm -rf "$tmp"; return 0; fi
     if [[ $pkg != "$want" ]]; then
@@ -148,8 +133,10 @@ PY
     rm -rf "${P_FS:?}/$dir"
     mkdir -p "$P_FS/$dir"
     name=${dir##*/}
-    cp -f "$apk" "$P_FS/$dir/$name.apk"; chmod 0644 "$P_FS/$dir/$name.apk"
-    nlib=$(apps_extract_libs "$apk" "$P_FS/$dir")
+    cp -f "$apk" "$P_FS/$dir/$name.apk"
+    for d in "$tmp"/*.apk; do [[ $d == "$apk" ]] || cp -f "$d" "$P_FS/$dir/"; done
+    chmod 0644 "$P_FS/$dir"/*.apk
+    nlib=0; for d in "$P_FS/$dir"/*.apk; do nlib=$(( nlib + $(apps_extract_libs "$d" "$P_FS/$dir") )); done
     new=$(du -sb "$P_FS/$dir" | cut -f1)
     ok "Apps: $label ($pkg) -> $dir  [lama $(( old / 1048576 )) MB -> baru $(( new / 1048576 )) MB, $nlib lib native]"
     if [[ $dir == */priv-app/* ]]; then apps_privapp_allowlist "$apk" "$pkg" "$dir"; fi

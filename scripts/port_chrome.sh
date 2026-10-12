@@ -10,7 +10,7 @@
 #                     true  = selalu pasang Chrome (kalau belum ada)
 #                     false = mati
 #  CHROME_APK       : URL / path APK Chrome (com.android.chrome). Boleh juga bundle .apkm/.xapk/.apks
-#                     (hanya base.apk yang dipakai). Kosong = coba ambil dari ROM base
+#                     (base + semua split dipasang). Kosong = coba ambil dari ROM base
 #  CHROME_FROM_BASE : true (default) = kalau CHROME_APK kosong, salin Chrome dari product base
 #  CHROME_DIR       : lokasi di ROM port (default product/app/Chrome)
 #  CHROME_FORCE     : true = tetap dipasang walau versi TrichromeLibrary tidak cocok (Chrome tidak akan jalan)
@@ -90,8 +90,8 @@ chrome_log_donor_lib() {
 }
 
 browser_fallback() {
-    local mode=${BROWSER_FALLBACK:-auto} idx="$WORK/browser_port.tsv" re list pkg dir
-    local dst_rel=${CHROME_DIR:-product/app/Chrome} dst name src tmp kind apk sz n
+    local mode=${BROWSER_FALLBACK:-auto} idx="$WORK/browser_port.tsv" re list dir
+    local dst_rel=${CHROME_DIR:-product/app/Chrome} dst name src tmp kind apk sz n f
     if [[ $mode == false ]]; then log "Browser: dimatikan (BROWSER_FALLBACK=false)"; return 0; fi
 
     re=$BROWSER_RE_DEFAULT
@@ -119,28 +119,13 @@ browser_fallback() {
     if [[ -n ${CHROME_APK:-} ]]; then
         src=$(fetch "$CHROME_APK" "$WORK/dl" chrome_src)
         tmp="$WORK/chrome_tmp"; rm -rf "$tmp"; mkdir -p "$tmp"
-        kind=$(python3 - "$src" "$tmp/Chrome.apk" <<'PY'
-import sys, zipfile
-src, out = sys.argv[1], sys.argv[2]
-try:
-    z = zipfile.ZipFile(src)
-except Exception:
-    print("invalid"); raise SystemExit
-names = z.namelist()
-if "AndroidManifest.xml" in names:
-    open(out, "wb").write(open(src, "rb").read()); print("apk")
-elif "base.apk" in names:
-    open(out, "wb").write(z.read("base.apk")); print("bundle")
-else:
-    print("invalid")
-PY
-)
-        case $kind in
+        kind=$(python3 "$SCRIPT_DIR/apk_bundle.py" "$src" "$tmp" base)
+        case ${kind%% *} in
             apk)    ;;
-            bundle) log "Browser: CHROME_APK berupa bundle, hanya base.apk yang dipakai (tanpa split bahasa/dpi)" ;;
+            bundle) log "Browser: CHROME_APK berupa bundle: base + ${kind#* } split ikut dipasang" ;;
             *)      warn "Browser: CHROME_APK bukan APK/bundle valid, Chrome tidak dipasang"; rm -rf "$tmp"; return 0 ;;
         esac
-        apk="$tmp/Chrome.apk"
+        apk="$tmp/base.apk"
         name=$(python3 "$SCRIPT_DIR/apk_index.py" --apk "$apk")
         if [[ -z $name ]]; then warn "Browser: package CHROME_APK tidak terbaca, Chrome tidak dipasang"; rm -rf "$tmp"; return 0; fi
         if [[ $name != com.android.chrome ]]; then warn "Browser: package CHROME_APK '$name' (bukan com.android.chrome), tetap dipasang"; fi
@@ -149,8 +134,10 @@ PY
             rm -rf "$tmp"; return 0
         fi
         mkdir -p "$dst"
-        cp -f "$apk" "$dst/${dst_rel##*/}.apk"; chmod 0644 "$dst/${dst_rel##*/}.apk"
-        n=$(chrome_extract_libs "$apk" "$dst")
+        cp -f "$apk" "$dst/${dst_rel##*/}.apk"
+        for f in "$tmp"/*.apk; do [[ $f == "$apk" ]] || cp -f "$f" "$dst/"; done
+        chmod 0644 "$dst"/*.apk
+        n=0; for f in "$dst"/*.apk; do n=$(( n + $(chrome_extract_libs "$f" "$dst") )); done
         if [[ ${n:-0} -gt 0 ]]; then log "Browser: $n library native diekstrak ke $dst_rel/lib"; fi
         sz=$(du -sb "$dst" | cut -f1)
         ok "Browser: $name -> $dst_rel ($(( sz / 1048576 )) MB, dari CHROME_APK)"

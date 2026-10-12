@@ -222,7 +222,7 @@ PY
 }
 
 arch64_fix() {
-    local mode=${ARCH64_FIX,,} root sysdir f n lib rc
+    local mode=${ARCH64_FIX,,} root sysdir f n rc
     case $mode in
         false|off|no|0) log "arch64: dimatikan (ARCH64_FIX=$ARCH64_FIX)"; return 0 ;;
         auto)

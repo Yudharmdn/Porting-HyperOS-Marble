@@ -1208,7 +1208,7 @@ patch_vendor_fstab() {
     fi
     # tiap partisi EXT4 harus punya baris mount di fstab vendor; kalau tidak, init tidak me-mount-nya
     for p in $EXT4_PARTITIONS; do
-        if ! grep -qE "^[^#]*[[:space:]]/$p[[:space:]]" "$B_FS"/vendor/etc/fstab.* 2>/dev/null; then
+        if ! grep -qE "^[^#]*[[:space:]]/${p}[[:space:]]" "$B_FS"/vendor/etc/fstab.* 2>/dev/null; then
             warn "fstab: mount point /$p tidak ada di vendor/etc/fstab.* -> $p EXT4 kemungkinan tidak ter-mount (bootloop). Keluarkan $p dari ext4_partitions"
         fi
     done
