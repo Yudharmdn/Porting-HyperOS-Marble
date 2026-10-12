@@ -109,6 +109,7 @@ env:
   # dari ROM base: overlay = Devices* + Aosp/Miui framework, Settings, biometrik, telephony (seperti toraidl)
   REPLACE_FROM_BASE: "device_features displayconfig overlay camera misound biometric"
   EU_SYSTEMSERVER_PATCH: "true"  # donor xiaomi.eu: kosongkan constructor SystemServerImpl (miui-services.jar), seperti toraidl
+  DONOR_APKS: "Settings"        # SEMENTARA: APK donor asli (nama APK/file, spasi) -> artifact donor-apks. Kosong = mati
   ROM_AUTHOR: "Yudharn"         # About phone: "by xiaomi.eu" -> "by Yudharn" lewat overlay (kosong = mati)
   DEBLOAT_PRESET: none         # debloat hanya dari debloat_packages.txt (safe = + hapus semua data-app)
   DEBLOAT_SAFE_KEEP: "MIUIGallery"   # folder data-app yang dipertahankan (pisah spasi)
@@ -221,6 +222,16 @@ jobs:
           set -euo pipefail
           sudo -E env "PATH=$PATH" bash scripts/port.sh
           sudo chown -R "$USER" "$OUT"
+
+      - name: Upload APK donor (sementara, untuk analisa)
+        if: ${{ always() && env.DONOR_APKS != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: donor-apks-${{ github.run_number }}
+          path: ${{ env.WORK }}/donor_apks
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload log kerja (hanya kalau gagal)
         if: ${{ failure() }}
