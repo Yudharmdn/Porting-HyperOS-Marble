@@ -11,6 +11,7 @@ Stdout:
   DEX  <apk/jar>                                                   needle ada di kode (tidak bisa lewat overlay)
   OVERLAY <target-pkg> <dir> <jumlah>                              sumber overlay siap dibangun apktool
   PATCH <apk>                                                      APK overlay yang memuat teks: dipatch langsung
+  FMT  <apk> <target-pkg> string/<nama> ...                        format "by %s" di Settings (nama diisi kode)
 
   rom_branding.py --patch-decoded DIR --author Yudharn [--needle/--match]  -> "PATCHED <n>"
 """
@@ -107,12 +108,11 @@ def qualifier(cfg):
     return "-".join(q)
 
 
-def arsc_strings(data, needle):
-    """-> [(type, name, qualifier|None, value, ambigu)] untuk resource string yang mengandung needle"""
+def arsc_strings(data, pred):
+    """-> [(type, name, qualifier|None, value, ambigu)] untuk resource string yang lolos pred(value)"""
     res = []
     hsize = struct.unpack_from("<HHI", data, 0)[1]
     pos, gstr = hsize, []
-    low = needle.lower()
     while pos + 8 <= len(data):
         ctype, _h, csize = struct.unpack_from("<HHI", data, pos)
         if csize < 8:
@@ -120,12 +120,12 @@ def arsc_strings(data, needle):
         if ctype == 0x0001:
             gstr = string_pool(data, pos)
         elif ctype == 0x0200:
-            res += package_strings(data, pos, csize, gstr, low)
+            res += package_strings(data, pos, csize, gstr, pred)
         pos += csize
     return res
 
 
-def package_strings(data, pkg, psize, gstr, low):
+def package_strings(data, pkg, psize, gstr, pred):
     phsize = struct.unpack_from("<H", data, pkg + 2)[0]
     type_off, _lpt, key_off = struct.unpack_from("<III", data, pkg + 268)
     types = string_pool(data, pkg + type_off)
@@ -164,7 +164,7 @@ def package_strings(data, pkg, psize, gstr, low):
                     dtype, dval = data[e + 11], struct.unpack_from("<I", data, e + 12)[0]
                 kname = keys[kidx] if kidx < len(keys) else "?"
                 ids.setdefault((tname, kname), set()).add(idx)
-                if dtype != 0x03 or dval >= len(gstr) or low not in gstr[dval].lower():
+                if dtype != 0x03 or dval >= len(gstr) or not pred(gstr[dval]):
                     continue
                 out.append((tname, kname, q, gstr[dval]))
         pos += csize
@@ -237,14 +237,20 @@ def main():
     ap.add_argument("--author", required=True)
     ap.add_argument("--out")
     ap.add_argument("--dex", action="store_true", help="juga cari needle di classes*.dex (lambat)")
+    ap.add_argument("--format-pkg", default="com.android.settings",
+                    help="package yang dicek untuk format 'by %%s' (teks by disusun dari prop/kode)")
+    ap.add_argument("--format-match", default=r"(?i)^\s*by\s*%(1\$)?s\s*$")
     ap.add_argument("--patch-decoded", help="folder hasil apktool d: ganti teks di res/values*/strings.xml")
     a = ap.parse_args()
     nb = [a.needle.encode(), a.needle.encode("utf-16-le")]
     match = re.compile(a.match)
     repl = re.compile(re.escape(a.needle), re.I)
+    low = a.needle.lower()
     if a.patch_decoded:
         return patch_decoded(a.patch_decoded, match, repl, a.author)
-    targets = {}
+    fmt = re.compile(a.format_match)
+    ph = re.compile(r"%(\d+\$)?s")
+    targets, fmt_targets = {}, {}
     for top in DIRS:
         base = os.path.join(a.root, top)
         for dp, _dn, fn in os.walk(base):
@@ -263,22 +269,33 @@ def main():
                     if "resources.arsc" not in names:
                         continue
                     arsc = z.read("resources.arsc")
-                    if not any(b in arsc for b in nb):
-                        continue
+                    has_needle = any(b in arsc for b in nb)
                     pkg, tgt = manifest_info(z.read("AndroidManifest.xml"))
-                    hits = arsc_strings(arsc, a.needle)
-                except zipfile.BadZipFile:
+                    target = tgt or pkg
+                    if not has_needle and target != a.format_pkg:
+                        continue
+                    hits = arsc_strings(arsc, lambda v: low in v.lower()) if has_needle else []
+                    fhits = (arsc_strings(arsc, lambda v: bool(fmt.search(v)))
+                             if target == a.format_pkg else [])
+                except (zipfile.BadZipFile, OSError):  # bukan zip / symlink putus
                     continue
                 except Exception as e:  # format tak dikenal: lewati, jangan gagalkan build
                     print("ERR  %s: %s" % (rel, e))
                     continue
-                target = tgt or pkg
+                # teks "by <host>" disusun dari format "by %s": ganti formatnya jadi "by <author>"
+                for t, n, q, v, ambig in fhits:
+                    if t != "string" or ambig or q is None:
+                        continue
+                    new = ph.sub(lambda _m: a.author.replace("%", "%%"), v)
+                    print("FMT  %s %s string/%s [%s] %r -> %r" % (rel, target, n, "default" if q == "" else q, v, new))
+                    fmt_targets.setdefault(target, {})[(n, q)] = new
                 if tgt:  # APK overlay: dipatch langsung (decode -> ganti teks -> build -> tanda tangan ulang)
                     for t, n, q, v, _amb in hits:
                         if t == "string" and match.search(v):
                             print("HIT  %s %s string/%s [%s] %r" % (rel, target, n, "default" if q == "" else (q or "?"), v))
                     if any(t == "string" and match.search(v) for t, _n, _q, v, _a in hits):
                         print("PATCH %s" % rel)
+                        targets.setdefault(target, {})
                     continue
                 for t, n, q, v, ambig in hits:
                     if t != "string":
@@ -296,7 +313,13 @@ def main():
                     new = repl.sub(a.author, v)
                     print("HIT  %s %s string/%s [%s] %r -> %r" % (rel, target, n, qs, v, new))
                     targets.setdefault(target, {})[(n, q)] = new
+    # format "by %s" hanya dipakai kalau teks "by xiaomi.eu" utuh tidak ditemukan untuk target itu
+    for target, items in fmt_targets.items():
+        if target not in targets:
+            targets[target] = items
     for target, items in sorted(targets.items()):
+        if not items:
+            continue
         d = write_overlay(a.out, target, [(n, q, v) for (n, q), v in items.items()], a.author)
         print("OVERLAY %s %s %d" % (target, d, len(items)))
 

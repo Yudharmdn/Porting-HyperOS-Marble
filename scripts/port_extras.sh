@@ -11,7 +11,7 @@
 #    millet_fix                 ro.millet.netlink disamakan dengan marble
 #    unlock_device_features     nyalakan fitur tambahan di product/etc/device_features/*.xml
 #    files_from_base            bootanimation, VoiceTrigger (base A15), props ringan (HyperOS-Port-Python)
-#    rom_branding               "by xiaomi.eu" di About phone -> "by $ROM_AUTHOR" (overlay RRO)
+#    rom_branding               "by xiaomi.eu" / format "by %s" di About phone -> "by $ROM_AUTHOR" (overlay RRO)
 # =============================================================================
 
 AOD_FIX=${AOD_FIX:-auto}            # auto | true | false
@@ -218,7 +218,7 @@ rom_branding() {
     if ! python3 "$SCRIPT_DIR/rom_branding.py" --root "$P_FS" --out "$out" "${args[@]}" > "$lf" 2>&1; then
         tail -n 5 "$lf" >&2; warn "Branding: scan gagal, dilewati"; return 0
     fi
-    while IFS= read -r a; do log "Branding: $a"; done < <(grep -E '^(HIT|SKIP|ERR)' "$lf" | head -n 40 || true)
+    while IFS= read -r a; do log "Branding: $a"; done < <(grep -E '^(FMT|HIT|SKIP|ERR)' "$lf" | head -n 40 || true)
 
     while read -r kind a b c <&3; do
         if [[ $kind == PATCH ]]; then
@@ -243,6 +243,39 @@ rom_branding() {
     if [[ $n -eq 0 ]]; then
         python3 "$SCRIPT_DIR/rom_branding.py" --root "$P_FS" --out "$out" --dex "${args[@]}" > "$lf.dex" 2>&1 || true
         while IFS= read -r a; do log "Branding: $a"; done < <(grep '^DEX' "$lf.dex" | head -n 20 || true)
-        warn "Branding: '$BRANDING_FROM' (regex $BRANDING_MATCH) tidak ditemukan di resource APK -> tidak diganti. Baris 'DEX' di atas = teks tertanam di kode, tidak bisa lewat overlay"
+        branding_probe
+        warn "Branding: teks '$BRANDING_FROM' / format 'by %s' tidak ditemukan di resource -> tidak diganti. Kirim baris 'Branding probe' di log untuk dianalisa"
     fi
+}
+
+# branding_probe: diagnosa di kode mana teks "by ..." About phone disusun (framework.jar + Settings)
+branding_probe() {
+    local bj="$TOOLS_DIR/bin/apktool/baksmali-3.0.5.jar" d="$WORK/branding_probe" f dex line
+    [[ -f $bj ]] || { log "Branding probe: baksmali tidak ada, dilewati"; return 0; }
+    rm -rf "$d"; mkdir -p "$d"
+    for f in "$P_FS/system/system/framework/framework.jar" \
+             "$(find "$P_FS/system_ext/priv-app/Settings" "$P_FS/product/priv-app/Settings" -maxdepth 1 -name '*.apk' 2>/dev/null | head -n1 || true)"; do
+        [[ -f $f ]] || continue
+        python3 - "$f" "$d/${f##*/}" "$BRANDING_FROM" <<'PY'
+import os, re, sys, zipfile
+src, out, needle = sys.argv[1:4]
+os.makedirs(out, exist_ok=True)
+z = zipfile.ZipFile(src)
+for n in z.namelist():
+    if re.fullmatch(r"classes\d*\.dex", n):
+        b = z.read(n)
+        if needle.encode() in b or b"ro.build.host" in b:
+            open(os.path.join(out, n), "wb").write(b)
+PY
+        for dex in "$d/${f##*/}"/*.dex; do
+            if [[ -f $dex ]]; then java -jar "$bj" d --api 34 "$dex" -o "${dex%.dex}" >/dev/null 2>&1 || true; fi
+        done
+    done
+    while IFS= read -r line; do log "Branding probe: $line"; done < <(
+        find "$d" -name '*.smali' -print0 2>/dev/null | xargs -0 -r awk -v n="\"$BRANDING_FROM\"" '
+            /^\.method/ {m = $NF}
+            index($0, n) || index($0, "\"ro.build.host\"") || index($0, "Landroid/os/Build;->HOST") {
+                f = FILENAME; sub(/.*branding_probe\//, "", f)
+                gsub(/^[ \t]+/, ""); print f " " m " | " $0
+            }' 2>/dev/null | head -n 40 || true)
 }
