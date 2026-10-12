@@ -28,7 +28,7 @@ After merging them, `scripts/port.sh` patches the parts that usually stop a port
 - **fstab and vbmeta:** `/data` encryption is removed (in `vendor/etc/fstab.qcom` and in the first-stage fstab inside `vendor_boot`), the partitions in `ext4_partitions` are mounted rw, and verity is disabled in `vbmeta` and `vbmeta_system`.
 - **Keyboard:** Gboard is added as a system app, and the Chinese keyboards (Sogou, Baidu, iFlytek) are removed. With no other keyboard left, Gboard becomes the default on its own.
 - **Google apps from the base:** if the donor has no Play Services, GSF or Play Store (typical for China ROMs), they are copied from the base ROM's product partition (`GMS_FROM_BASE=auto`, `GMS_SCOPE=core`). If the donor already has them, nothing is copied.
-- **Chrome when the donor has no browser:** the debloat list removes Xiaomi's browser, so if nothing browser-like is left, Chrome is installed (`BROWSER_FALLBACK=auto`). It comes from `CHROME_APK` (a link to the APK, or to an `.apkm` bundle where only `base.apk` is used), or from the base ROM when that is empty. Chrome only works with a Trichrome library of exactly the same version as the one in the donor, so the build compares them first. On a mismatch Chrome is skipped and the log prints the version the donor provides, so you can pick a matching Chrome.
+- **Chrome when the donor has no browser:** the debloat list removes Xiaomi's browser, so if nothing browser-like is left, Chrome is installed (`BROWSER_FALLBACK=auto`). It comes from `CHROME_APK` (a link to the APK, or to an `.apkm`/`.apks`/`.xapk` bundle, installed with all its splits), or from the base ROM when that is empty. Chrome only works with a Trichrome library of exactly the same version as the one in the donor, so the build compares them first. On a mismatch Chrome is skipped and the log prints the version the donor provides, so you can pick a matching Chrome.
 - **Gallery, Editor and Camera from URL:** `MiuiGallery`, `MiMediaEditor` and `MiuiCamera` are replaced by the APKs in `GALLERY_APK`, `MEDIAEDITOR_APK` and `CAMERA_APK` (on by default, `APPS_FROM_URL`). The app folder is found by package name and replaced completely, the native libs are extracted next to the APK, and for privileged apps a permission allowlist is generated from the APK, so a newer version can't crash system_server on boot. This runs after debloat and after the `devices/` files, so it wins over both (and over the camera taken from marble). If the package inside the APK isn't the expected one, the donor app is left alone.
 - **device_features unlock:** a few extra features are switched on in `marble.xml` and `marblein.xml` (smart FPS at the highest refresh rate, default eye-care mode, AOD fullscreen/always-on). Use the `unlock_features` input to change the list, or `none` to turn it off.
 - **Debloat:** unneeded apps are removed based on `debloat_packages.txt`.
@@ -123,7 +123,7 @@ Updating later to a newer build made with the same settings usually doesn't need
 
 Some apps are removed through `debloat_packages.txt`, so a few things are on you:
 
-- **Browser:** Xiaomi's browser is on the debloat list, so Chrome is added from `CHROME_APK` when the donor has no browser. If the build log says Chrome was skipped (Trichrome version mismatch, or no source), there is no browser at all, so have a browser APK ready. Chrome from an `.apkm` bundle only gets `base.apk`, which can leave some language or screen-density resources out.
+- **Browser:** Xiaomi's browser is on the debloat list, so Chrome is added from `CHROME_APK` when the donor has no browser. If the build log says Chrome was skipped (Trichrome version mismatch, or no source), there is no browser at all, so have a browser APK ready.
 - **Gallery, Editor and Camera:** replaced by the APKs from `GALLERY_APK`, `MEDIAEDITOR_APK` and `CAMERA_APK`. Whether those versions run well on marble is only known after flashing. Set a link to `""` to keep the donor's (or the base's) app instead.
 - **Google apps:** whatever the donor ships stays. xiaomi.eu donors come with Play Store and Play Services, official Chinese OTAs usually don't. The build log lists them under `Google:`.
 - **NFC:** not removed. Nothing in `debloat_packages.txt` touches it. If you want it gone, add the NFC app to that list.
@@ -197,6 +197,7 @@ scripts/installer_sanitize.py        makes sure the installer never wipes data
 scripts/sparse_split.py              splits super into super.img.0..8
 scripts/apk_index.py                 reads package names from APKs
 scripts/apk_static_lib.py            reads static shared library info (Trichrome) from an APK
+scripts/apk_bundle.py                unpacks an .apkm/.apks/.xapk bundle (base + splits)
 scripts/apk_perms.py                 lists the permissions an APK asks for (builds the privapp allowlist)
 scripts/update-binary.in             fallback installer (when not using the base META-INF)
 debloat_packages.txt                 the debloat list
