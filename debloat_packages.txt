@@ -151,11 +151,6 @@ product/app/MiGameService_GameAI
 product/data-app/SmartHome
 product/data-app/MIUIVideo
 product/data-app/MIUINotes
-product/data-app/MiuiScanner
-product/data-app/BaiduIME
-product/data-app/MIUIYoupin
-product/data-app/MIpay
-product/app/WinPlay
 
 # Opsional - kalau Settings/status bar terasa aneh karena overlay milik donor (marble stock tidak punya overlay ini):
 # product/overlay/SettingsRroDeviceSystemUiOverlay.apk | overlay Settings/SystemUI khas donor
