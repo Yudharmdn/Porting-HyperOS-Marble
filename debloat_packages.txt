@@ -148,6 +148,9 @@ product/app/GoogleTTS
 product/priv-app/Weather
 product/app/AiAsstVision
 system_ext/app/MiuiAudioMonitor
+product/app/MiGameService_GameAI
+product/data-app/SmartHome
+product/data-app/MIUIVideo
 
 # Opsional - kalau Settings/status bar terasa aneh karena overlay milik donor (marble stock tidak punya overlay ini):
 # product/overlay/SettingsRroDeviceSystemUiOverlay.apk | overlay Settings/SystemUI khas donor
