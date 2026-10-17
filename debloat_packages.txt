@@ -72,7 +72,7 @@ com.miui.greenguard                           | Family Guard / Kids
 com.miui.carlink                              | Car with Mi
 
 # Opsional Xiaomi - ada fitur yang hilang, hapus tanda '#' kalau mau:
-com.duokan.phone.remotecontroller           | Mi Remote (IR blaster) - JANGAN dihapus kalau pakai remote IR
+# com.duokan.phone.remotecontroller           | Mi Remote (IR blaster) - JANGAN dihapus kalau pakai remote IR
 com.miui.contentcatcher                     | Content Catcher (saran konten; App Vault/rekomendasi)
 com.miui.catcherpatch                       | pasangan Content Catcher
 com.xiaomi.aiasst.service                    | AI Translation / caption panggilan
