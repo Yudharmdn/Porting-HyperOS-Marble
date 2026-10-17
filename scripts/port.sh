@@ -27,7 +27,6 @@ DISABLE_ENCRYPTION=${DISABLE_ENCRYPTION:-true}
 RW_MOUNT=${RW_MOUNT:-true}
 DISABLE_AVB=${DISABLE_AVB:-true}
 DEBUG_ADB=${DEBUG_ADB:-true}
-DEVICE_ANTI=${DEVICE_ANTI:-}          # opsional: angka dari `fastboot getvar anti` di HP; lebih besar dari anti base -> build gagal
 SUPER_SIZE=${SUPER_SIZE:-auto}
 REPLACE_FROM_BASE=${REPLACE_FROM_BASE:-"device_features displayconfig overlay camera misound biometric"}
 # fitur tambahan di product/etc/device_features/*.xml, format "nama:tipe:nilai" dipisah spasi
@@ -203,28 +202,6 @@ load_base_env() { # muat info base (super/payload/anti) ke variabel global
     done
 }
 
-# anti_rollback_check: zip ini ikut mem-flash firmware ROM base (xbl/abl/tz/...). Kalau anti-rollback
-# HP lebih besar dari anti base, bootloader menolak firmware lama -> HP bisa brick.
-# CI tidak bisa melihat HP: nilai HP dibaca manual lewat `fastboot getvar anti` dan diisi ke DEVICE_ANTI.
-anti_rollback_check() {
-    local base=${ANTI_VER:-} dev=${DEVICE_ANTI:-}
-    dev=${dev//[[:space:]]/}
-    if [[ -n $dev && ! $dev =~ ^[0-9]+$ ]]; then die "DEVICE_ANTI '$dev' bukan angka (isi dengan hasil 'fastboot getvar anti')"; fi
-    if [[ -z $base ]]; then
-        warn "anti-rollback: nilai anti ROM base tidak terbaca dari skrip flash. Cek manual: 'fastboot getvar anti' di HP harus <= anti ROM base, kalau tidak firmware base bisa membuat HP brick"
-        if [[ -n $dev ]]; then warn "anti-rollback: DEVICE_ANTI=$dev diisi tapi anti base tidak diketahui, tidak bisa dibandingkan"; fi
-        return 0
-    fi
-    log "anti-rollback: anti ROM base = $base"
-    if [[ -z $dev ]]; then
-        warn "anti-rollback: DEVICE_ANTI kosong, tidak dicek. Jalankan 'fastboot getvar anti' di HP: hasilnya harus <= $base"
-    elif (( dev > base )); then
-        die "anti-rollback: anti HP ($dev) > anti ROM base ($base). Flashing firmware base akan ditolak / bisa brick. Pakai ROM base yang lebih baru"
-    else
-        ok "anti-rollback: anti HP ($dev) <= anti base ($base), aman"
-    fi
-}
-
 unpack_payload() { # payload dst pfx want
     local pl=$1 dst=$2 pfx=$3 want=$4 list="" p avail
     python3 "$SCRIPT_DIR/lp_tool.py" payload "$pl" > "$WORK/${pfx}_payload.env"
@@ -269,10 +246,11 @@ collect_images() { # src_tree dst pfx
         awk '{printf "    %10.1f MB  %s\n", $1/1048576, $2}'
     dir=$(dirname "$(find "$src" -type f -name 'boot.img' | head -n1)")
     [[ -d $dir && $dir != . ]] || die "[$pfx] boot.img / folder images tidak ditemukan di ROM"
-    # nilai anti-rollback ada di skrip flash ROM fastboot (flash_all*.sh / *install*.sh / .bat) atau updater-script
-    anti=$(find "$src" -maxdepth 4 -type f \( -name '*.sh' -o -name '*.bat' -o -name 'updater-script' \) -print0 2>/dev/null \
-        | xargs -0 -r grep -hoE 'CURRENT_ANTI_VER=[0-9]+' 2>/dev/null | head -n1 | cut -d= -f2 || true)
-    if [[ -n $anti ]]; then echo "ANTI_VER=$anti" >> "$WORK/${pfx}.env"; fi
+    f=$(find "$src" -maxdepth 3 -name 'flash_all*.sh' | head -n1)
+    if [[ -n $f ]]; then
+        anti=$(grep -oE 'CURRENT_ANTI_VER=[0-9]+' "$f" | head -n1 | cut -d= -f2 || true)
+        if [[ -n $anti ]]; then echo "ANTI_VER=$anti" >> "$WORK/${pfx}.env"; fi
+    fi
     # simpan META-INF (installer recovery) ROM base untuk INSTALLER=base
     local meta
     meta=$(find "$src" -maxdepth 3 -type d -name META-INF | head -n1)
@@ -1116,11 +1094,8 @@ MiuiFrameworkResOverlay XiaomiServiceFramework"
 
 # token daftar debloat: pisah koma / baris / spasi; label setelah '|' atau '#' dibuang
 debloat_tokens() {
-    # file: komentar setelah '|' atau '#' dibuang per BARIS dulu (koma di komentar tidak boleh jadi token)
-    # input DEBLOAT (workflow): dipisah koma/spasi, '|' di tiap potongan dibuang
-    { if [[ -f $DEBLOAT_PACKAGES_FILE ]]; then sed -e 's/#.*//' -e 's/|.*//' "$DEBLOAT_PACKAGES_FILE"; fi
-      printf '%s\n' "$DEBLOAT" | sed -e 's/#.*//' | tr ',' '\n' | sed -e 's/|.*//'; } \
-        | tr -s '[:space:]' '\n' | grep -v '^$' || true
+    { if [[ -f $DEBLOAT_PACKAGES_FILE ]]; then cat "$DEBLOAT_PACKAGES_FILE"; fi; printf '\n%s\n' "$DEBLOAT"; } \
+        | sed -e 's/#.*//' | tr ',' '\n' | sed -e 's/|.*//' | tr -s '[:space:]' '\n' | grep -v '^$' || true
 }
 
 # daftar keep: token berawalan '!' di debloat_packages.txt / input debloat (package, folder, atau path)
@@ -1715,7 +1690,6 @@ main() {
     base_file=$(fetch "$BASE_ROM" "$WORK/dl" base_rom)
     unpack_rom "$base_file" "$B_IMG" base all
     load_base_env
-    anti_rollback_check
     ls -la "$B_IMG"; dfree
     group_end
 
@@ -1920,8 +1894,7 @@ main() {
     (cd "$OUT" && sha256sum "$name.zip" > "$name.zip.sha256")
     ok "SELESAI: $OUT/$name.zip ($(du -h "$OUT/$name.zip" | cut -f1))"
     if [[ -n ${GITHUB_OUTPUT:-} ]]; then
-        { echo "zip=$OUT/$name.zip"; echo "name=$name"; echo "port_version=$port_ver"; echo "donor=$donor"
-          echo "anti_ver=${ANTI_VER:-unknown}"; } >> "$GITHUB_OUTPUT"
+        { echo "zip=$OUT/$name.zip"; echo "name=$name"; echo "port_version=$port_ver"; echo "donor=$donor"; } >> "$GITHUB_OUTPUT"
     fi
     group_end
 }
