@@ -151,6 +151,7 @@ product/app/MiGameService_GameAI
 product/data-app/SmartHome
 product/data-app/MIUIVideo
 product/data-app/MIUINotes
+product/data-app/MiMediaEditor
 
 # Opsional - kalau Settings/status bar terasa aneh karena overlay milik donor (marble stock tidak punya overlay ini):
 # product/overlay/SettingsRroDeviceSystemUiOverlay.apk | overlay Settings/SystemUI khas donor
@@ -166,6 +167,5 @@ product/data-app/MIUINotes
 !product/data-app/MIUIGallery                | Galeri
 !product/priv-app/MIUISecurityCenter         | Security
 !product/priv-app/MIUIAICR                   | AI (pengenalan teks/gambar)
-!product/data-app/MiMediaEditor              | editor foto/video Galeri
 !product/priv-app/MIUIAccessibility          | aksesibilitas
 !com.miui.accessibility                      | aksesibilitas
