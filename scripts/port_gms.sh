@@ -12,12 +12,19 @@
 #  GMS_SCOPE     : core  = gms + gsf + vending + pendukungnya (ext services, partner setup, sync adapter, ...) (default)
 #                  all   = semua com.google.android.* di base (kecuali WebView/Chrome/keyboard)
 #  GMS_EXCLUDE   : regex tambahan (nama package / path) yang tidak ikut disalin
+#  GMS_STUB_MAX_MB: ukuran (MB) di bawah ini = APK gms / Play Store donor dianggap STUB (default 10).
+#                  ROM China membawa stub kecil (mis. com.android.vending di GooglePlayServicesUpdater);
+#                  stub dibuang dan diganti yang asli dari base, kalau base punya.
 #
 #  Yang disalin dari partisi product base (system/system_ext base tidak diekstrak):
 #    - folder app Google (app/, priv-app/, data-app/), beserta allowlist privapp dari base
 #    - etc/{permissions,default-permissions,sysconfig,preferred-apps}/*google|gms|gsf|vending|phonesky*
 #    - overlay *Gms*/*Google*  dan  framework/*google*.jar
-#  Tidak ada file donor yang ditimpa (cp -n / folder yang sudah ada dilewati).
+#  File donor tidak ditimpa. Pengecualian: stub gms/Play Store (lihat GMS_STUB_MAX_MB).
+#  Kalau nama folder sudah dipakai package lain di donor (mis. GmsCore milik ROM China),
+#  GMS dari base dipasang di folder bernama <folder>Google.
+#
+#  Bagian bawah file: warn() yang cuma berisi informasi (sudah ditangani otomatis) dijadikan log biasa.
 # =============================================================================
 
 GMS_CORE_PKGS="com.google.android.gms com.google.android.gsf com.android.vending"
@@ -33,6 +40,7 @@ gms_from_base() {
     local excl="${GMS_EXCLUDE_DEFAULT}${GMS_EXCLUDE:+|$GMS_EXCLUDE}"
     local pidx="$WORK/gms_port.tsv" bidx="$WORK/gms_base.tsv"
     local re core miss="" base_miss="" pkg dir sz bytes=0 napp=0 ncfg=0 nextra=0 f rel d sub dre
+    local stub_max real newdir other stub_left=""
     local -A seen=() seenpkg=()
 
     if [[ $mode == false ]]; then log "GMS: dimatikan (GMS_FROM_BASE=false)"; return 0; fi
@@ -43,6 +51,32 @@ gms_from_base() {
     esac
 
     python3 "$SCRIPT_DIR/apk_index.py" "$P_FS" > "$pidx"
+    python3 "$SCRIPT_DIR/apk_index.py" "$B_FS" > "$bidx"
+
+    # ROM donor China: gms / Play Store cuma stub kecil -> dibuang, diganti yang asli dari base
+    stub_max=$(( ${GMS_STUB_MAX_MB:-10} * 1048576 ))
+    for core in com.google.android.gms com.android.vending; do
+        gms_pkg_in_index "$core" "$pidx" || continue
+        real=0
+        while IFS= read -r d; do
+            sz=$(du -sb "$P_FS/$d" | cut -f1)
+            if (( sz >= stub_max )); then real=1; fi
+        done < <(awk -F'\t' -v p="$core" '$1 == p {print $2}' "$pidx")
+        [[ $real == 0 ]] || continue                      # donor punya yang asli
+        if ! gms_pkg_in_index "$core" "$bidx"; then       # stub, dan base tidak punya yang asli
+            warn "GMS: $core di donor cuma stub dan ROM base tidak punya yang asli -> Play Store/login Google tidak akan jalan"
+            stub_left+=" $core"; continue
+        fi
+        if [[ $real == 0 ]]; then
+            while IFS= read -r d; do
+                sz=$(du -sb "$P_FS/$d" | cut -f1)
+                log "GMS: $core di donor cuma stub ($d, $(( sz / 1024 )) KB) -> dibuang, diganti yang asli dari base"
+                rm -rf "${P_FS:?}/$d"
+            done < <(awk -F'\t' -v p="$core" '$1 == p {print $2}' "$pidx")
+            awk -F'\t' -v p="$core" '$1 != p' "$pidx" > "$pidx.new" && mv -f "$pidx.new" "$pidx"
+        fi
+    done
+
     for core in $GMS_CORE_PKGS; do
         if ! gms_pkg_in_index "$core" "$pidx"; then miss+=" $core"; fi
     done
@@ -57,7 +91,6 @@ gms_from_base() {
         log "GMS: GMS_FROM_BASE=true, melengkapi paket Google yang belum ada di donor (scope: $scope)"
     fi
 
-    python3 "$SCRIPT_DIR/apk_index.py" "$B_FS" > "$bidx"
     for core in $miss; do
         if ! gms_pkg_in_index "$core" "$bidx"; then base_miss+=" $core"; fi
     done
@@ -76,14 +109,20 @@ gms_from_base() {
         if gms_pkg_in_index "$pkg" "$pidx"; then continue; fi          # donor sudah punya package ini
         if [[ -n ${seen[$dir]:-} || -n ${seenpkg[$pkg]:-} ]]; then continue; fi
         seen[$dir]=1; seenpkg[$pkg]=1
+        newdir=$dir
         if [[ -e $P_FS/$dir ]]; then
-            warn "GMS: $dir sudah ada di donor dengan package lain, $pkg dilewati"; continue
+            other=$(awk -F'\t' -v d="$dir" '$2 == d {print $1; exit}' "$pidx")
+            newdir="${dir}Google"
+            if [[ -e $P_FS/$newdir ]]; then
+                warn "GMS: $dir dan $newdir sudah ada di donor, $pkg dilewati"; continue
+            fi
+            log "GMS: $dir dipakai package lain di donor (${other:-?}) -> $pkg dipasang di $newdir"
         fi
-        mkdir -p "$P_FS/$(dirname "$dir")"
-        cp -a "$B_FS/$dir" "$P_FS/$dir"
-        rm -rf "${P_FS:?}/$dir/oat"   # odex/vdex dari base tidak cocok dengan Android donor
-        sz=$(du -sb "$P_FS/$dir" | cut -f1); bytes=$(( bytes + sz )); napp=$((napp + 1))
-        ok "GMS: $pkg -> $dir ($(( sz / 1048576 )) MB)"
+        mkdir -p "$P_FS/$(dirname "$newdir")"
+        cp -a "$B_FS/$dir" "$P_FS/$newdir"
+        rm -rf "${P_FS:?}/$newdir/oat"   # odex/vdex dari base tidak cocok dengan Android donor
+        sz=$(du -sb "$P_FS/$newdir" | cut -f1); bytes=$(( bytes + sz )); napp=$((napp + 1))
+        ok "GMS: $pkg -> $newdir ($(( sz / 1048576 )) MB)"
         base_privapp_perms "$dir"
     done 3< "$bidx"
 
@@ -126,7 +165,23 @@ gms_from_base() {
     done
     if [[ -n $miss ]]; then
         warn "GMS: setelah disalin masih tidak ada:$miss -> login Google / Play Store tidak akan jalan"
+    elif [[ -n $stub_left ]]; then
+        log "GMS: masih stub (bukan yang asli):$stub_left"
     else
         ok "GMS: gms, gsf, dan Play Store sekarang ada di ROM port"
     fi
 }
+
+# -----------------------------------------------------------------------------
+#  warn() yang cuma informasi -> log biasa (tidak jadi anotasi kuning di ringkasan build).
+#  WARN_INFO_RE = regex (bash ERE) pesan yang diturunkan. Kosongkan ("") untuk mematikan.
+#  Default: peringatan VINTF "level vendor lebih tua ... matrix sudah ditambal". Itu sudah ditangani
+#  (compatibility_matrix disalin dari base) dan kebutuhan device matrix dicek terpisah (RESULT 0).
+# -----------------------------------------------------------------------------
+WARN_INFO_RE=${WARN_INFO_RE-'^VINTF: vendor level .* lebih tua dari yang didukung Android donor\. Matrix sudah ditambal'}
+if declare -F warn >/dev/null && ! declare -F _warn_orig >/dev/null; then
+    eval "_warn_orig() $(declare -f warn | tail -n +2)"
+    warn() {
+        if [[ -n $WARN_INFO_RE && $* =~ $WARN_INFO_RE ]]; then log "$*"; else _warn_orig "$@"; fi
+    }
+fi

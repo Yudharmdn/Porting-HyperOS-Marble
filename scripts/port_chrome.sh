@@ -15,6 +15,10 @@
 #  CHROME_DIR       : lokasi di ROM port (default product/app/Chrome)
 #  CHROME_FORCE     : true = tetap dipasang walau versi TrichromeLibrary tidak cocok (Chrome tidak akan jalan)
 #  BROWSER_PACKAGES : regex tambahan nama package yang dianggap browser (mis. "org\.example\..*")
+#  CHROME_LIB_FROM_BASE : true (default) = donor tanpa TrichromeLibrary yang cocok -> salin library dari product base
+#                     kalau versinya persis sama (ROM China biasanya tanpa Trichrome)
+#  CHROME_LIB_APK   : URL / path APK TrichromeLibrary (versi sama dengan Chrome), dipakai kalau donor dan base tidak punya
+#  CHROME_LIB_DIR   : lokasi library di ROM port (default product/app/TrichromeLibrary)
 #
 #  Chrome stable memakai static shared library com.google.android.trichromelibrary dengan
 #  versi TEPAT sama dengan TrichromeLibrary di ROM (yang dipasangkan dengan WebView donor).
@@ -24,7 +28,70 @@
 
 BROWSER_RE_DEFAULT='^(com\.android\.chrome|com\.android\.browser|com\.mi\.globalbrowser(\.mini)?|com\.miui\.browser|com\.google\.android\.apps\.chrome|com\.microsoft\.emmx|com\.brave\.browser(_[a-z]+)?|com\.opera\.(browser|mini\.native)(\..*)?|org\.mozilla\.(firefox|fenix|focus)(_[a-z]+)?|com\.duckduckgo\.mobile\.android|com\.sec\.android\.app\.sbrowser|com\.vivaldi\.browser|com\.kiwibrowser\.browser|com\.heytap\.browser|com\.UCMobile(\..*)?)$'
 
+# chrome_lib_provides <apk> <nama> <versi> -> 0 kalau APK menyediakan library itu persis di versi itu
+chrome_lib_provides() {
+    python3 "$SCRIPT_DIR/apk_static_lib.py" "$1" \
+        | awk -v n="$2" -v v="$3" '$1 == "provides" && $2 == n && $3 == v {f = 1} END {exit !f}'
+}
+
+# chrome_lib_from_base <nama> <versi> : salin library dari product base kalau versinya persis sama
+chrome_lib_from_base() {
+    local name=$1 ver=$2 bidx="$WORK/chrome_base_lib.tsv" d f dst sz seen=""
+    is_true "${CHROME_LIB_FROM_BASE:-true}" || return 1
+    python3 "$SCRIPT_DIR/apk_index.py" "$B_FS" > "$bidx"
+    while IFS=$'\t' read -r _pkg d; do
+        [[ $d == product/* ]] || continue
+        for f in "$B_FS/$d"/*.apk; do
+            [[ -f $f ]] || continue
+            seen+=" $(python3 "$SCRIPT_DIR/apk_static_lib.py" "$f" | awk -v n="$name" '$1 == "provides" && $2 == n {printf "%s ", $3}')"
+            if chrome_lib_provides "$f" "$name" "$ver"; then
+                dst="$P_FS/$d"
+                if [[ -e $dst ]]; then log "Chrome: $d sudah ada di ROM port, library dari base tidak disalin"; return 1; fi
+                mkdir -p "$(dirname "$dst")"
+                cp -a "$B_FS/$d" "$dst"
+                rm -rf "${dst:?}/oat"   # odex/vdex dari base tidak cocok dengan Android donor
+                sz=$(du -sb "$dst" | cut -f1)
+                ok "Chrome: library $name versi $ver disalin dari ROM base -> $d ($(( sz / 1048576 )) MB)"
+                return 0
+            fi
+        done
+    done < <(awk -F'\t' -v n="$name" 'index($1, n) == 1 {print}' "$bidx")
+    log "Chrome: ROM base menyediakan library $name versi:${seen:- (tidak ada)}"
+    return 1
+}
+
+# chrome_lib_from_apk <nama> <versi> : pasang CHROME_LIB_APK kalau menyediakan library itu persis di versi itu
+chrome_lib_from_apk() {
+    local name=$1 ver=$2 src tmp kind apk dst_rel=${CHROME_LIB_DIR:-product/app/TrichromeLibrary} dst sz got
+    [[ -n ${CHROME_LIB_APK:-} ]] || return 1
+    dst="$P_FS/$dst_rel"
+    if [[ -e $dst ]]; then log "Chrome: $dst_rel sudah ada, CHROME_LIB_APK dilewati"; return 1; fi
+    if [[ ! -d $P_FS/${dst_rel%%/*} ]]; then warn "Chrome: partisi ${dst_rel%%/*} tidak ada, CHROME_LIB_APK dilewati"; return 1; fi
+    check_url CHROME_LIB_APK "$CHROME_LIB_APK"
+    src=$(fetch "$CHROME_LIB_APK" "$WORK/dl" chrome_lib)
+    tmp="$WORK/chrome_lib_tmp"; rm -rf "$tmp"; mkdir -p "$tmp"
+    kind=$(python3 "$SCRIPT_DIR/apk_bundle.py" "$src" "$tmp" lib)
+    case ${kind%% *} in
+        apk|bundle) ;;
+        *) warn "Chrome: CHROME_LIB_APK bukan APK valid, dilewati"; rm -rf "$tmp"; return 1 ;;
+    esac
+    apk="$tmp/lib.apk"
+    if ! chrome_lib_provides "$apk" "$name" "$ver"; then
+        got=$(python3 "$SCRIPT_DIR/apk_static_lib.py" "$apk" | awk '$1 == "provides" {printf "%s versi %s ", $2, $3}')
+        warn "Chrome: CHROME_LIB_APK menyediakan: ${got:-(tidak ada library)} -- butuh $name versi $ver"
+        rm -rf "$tmp"; return 1
+    fi
+    mkdir -p "$dst"
+    cp -f "$apk" "$dst/${dst_rel##*/}.apk"
+    chmod 0644 "$dst"/*.apk
+    sz=$(du -sb "$dst" | cut -f1)
+    ok "Chrome: library $name versi $ver dipasang dari CHROME_LIB_APK -> $dst_rel ($(( sz / 1048576 )) MB)"
+    rm -rf "$tmp"
+    return 0
+}
+
 # chrome_static_lib_ok <apk>  -> 0 = cocok / tidak butuh library, 1 = tidak cocok
+# Urutan: library di donor -> library di base (disalin) -> CHROME_LIB_APK (dipasang)
 chrome_static_lib_ok() {
     local apk=$1 uses name ver dir f provided found ok_all=0 idx="$WORK/chrome_port.tsv"
     uses=$(python3 "$SCRIPT_DIR/apk_static_lib.py" "$apk" | awk '$1 == "uses" {print $2 " " $3}')
@@ -46,8 +113,10 @@ chrome_static_lib_ok() {
         done < <(awk -F'\t' -v n="$name" 'index($1, n) == 1 {print}' "$idx")
         if [[ $found == 1 ]]; then
             ok "Chrome: library $name versi $ver tersedia di ROM donor"
+        elif chrome_lib_from_base "$name" "$ver" || chrome_lib_from_apk "$name" "$ver"; then
+            :
         else
-            warn "Chrome: butuh library $name versi $ver, ROM donor menyediakan:${provided:- (tidak ada)} -> Chrome TIDAK akan ter-install. Pakai Chrome dengan versi Trichrome yang sama dengan WebView donor"
+            log "Chrome: butuh library $name versi $ver, ROM donor menyediakan:${provided:- (tidak ada)}; base dan CHROME_LIB_APK juga tidak punya versi itu"
             ok_all=1
         fi
     done <<< "$uses"
@@ -130,7 +199,7 @@ browser_fallback() {
         if [[ -z $name ]]; then warn "Browser: package CHROME_APK tidak terbaca, Chrome tidak dipasang"; rm -rf "$tmp"; return 0; fi
         if [[ $name != com.android.chrome ]]; then warn "Browser: package CHROME_APK '$name' (bukan com.android.chrome), tetap dipasang"; fi
         if ! chrome_static_lib_ok "$apk" && ! is_true "${CHROME_FORCE:-false}"; then
-            warn "Browser: Chrome TIDAK dipasang (versi library tidak cocok). CHROME_FORCE=true untuk memaksa"
+            warn "Browser: Chrome TIDAK dipasang: library Trichrome yang dibutuhkan tidak ada di donor maupun base. Isi CHROME_LIB_APK (APK TrichromeLibrary, versi sama dengan Chrome) atau pakai Chrome yang versinya cocok. CHROME_FORCE=true untuk memaksa"
             rm -rf "$tmp"; return 0
         fi
         mkdir -p "$dst"
