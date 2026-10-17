@@ -54,6 +54,11 @@ on:
         required: false
         default: true
         type: boolean
+      device_anti:
+        description: "Opsional: angka dari 'fastboot getvar anti' di HP. Lebih besar dari anti ROM base -> build gagal (cegah brick). Kosong = tidak dicek, hanya peringatan"
+        required: false
+        default: ""
+        type: string
       recovery_img_url:
         description: "Opsional: URL recovery.img custom (OrangeFox). Kosong = recovery HP tidak disentuh"
         required: false
@@ -216,6 +221,7 @@ jobs:
           RW_MOUNT: ${{ inputs.rw_mount }}
           DEBUG_ADB: ${{ inputs.debug_adb }}
           RECOVERY_IMG: ${{ inputs.recovery_img_url }}
+          DEVICE_ANTI: ${{ inputs.device_anti }}
           UNLOCK_FEATURES: ${{ inputs.unlock_features }}
         run: |
           set -euo pipefail
@@ -284,6 +290,8 @@ jobs:
           DONOR: ${{ steps.port.outputs.donor }}
           PORT_VERSION: ${{ steps.port.outputs.port_version }}
           NAME: ${{ steps.port.outputs.name }}
+          ANTI_VER: ${{ steps.port.outputs.anti_ver }}
+          DEVICE_ANTI: ${{ inputs.device_anti }}
           EXT4_PARTITIONS: ${{ inputs.ext4_partitions }}
           DISABLE_ENCRYPTION: ${{ inputs.disable_encryption }}
           RW_MOUNT: ${{ inputs.rw_mount }}
@@ -298,6 +306,7 @@ jobs:
             echo "| Donor | ${DONOR:-?} |"
             echo "| Versi | ${PORT_VERSION:-?} |"
             echo "| Output | ${NAME:-gagal} |"
+            echo "| Anti-rollback base | ${ANTI_VER:-?} (HP: ${DEVICE_ANTI:-belum dicek, jalankan fastboot getvar anti}) |"
             echo "| EXT4 | ${EXT4_PARTITIONS} |"
             echo "| Encryption off | ${DISABLE_ENCRYPTION} |"
             echo "| RW | ${RW_MOUNT} |"
