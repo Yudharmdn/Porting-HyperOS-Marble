@@ -35,12 +35,47 @@ GMS_EXCLUDE_DEFAULT='webview|trichrome|chrome|inputmethod|keyboard'
 # pkg_in_index <pkg> <file tsv pkg\tdir>
 gms_pkg_in_index() { awk -F'\t' -v p="$1" '$1 == p {f = 1} END {exit !f}' "$2"; }
 
+# gms_verify: verifikasi NYATA hasil akhir di ROM port (bukan cuma daftar package):
+#   gms / gsf / Play Store ada, gms & Play Store bukan stub (ukuran), tiap package hanya di satu folder,
+#   allowlist privapp-permissions untuk gms & Play Store ada (tanpa itu: risiko bootloop).
+gms_verify() {
+    local idx="$WORK/gms_verify.tsv" stub_max core d sz mx n bad="" good="" al
+    local -a dl
+    stub_max=$(( ${GMS_STUB_MAX_MB:-10} * 1048576 ))
+    python3 "$SCRIPT_DIR/apk_index.py" "$P_FS" > "$idx"
+    for core in $GMS_CORE_PKGS; do
+        mapfile -t dl < <(awk -F'\t' -v p="$core" '$1 == p {print $2}' "$idx")
+        n=${#dl[@]}
+        if (( n == 0 )); then bad+=" $core(tidak ada)"; continue; fi
+        mx=0
+        for d in "${dl[@]}"; do
+            sz=$(du -sb "$P_FS/$d" | cut -f1)
+            if (( sz > mx )); then mx=$sz; fi
+        done
+        if (( n > 1 )); then bad+=" $core(ada di $n folder: ${dl[*]})"; continue; fi
+        if [[ $core != com.google.android.gsf ]] && (( mx < stub_max )); then
+            bad+=" $core(cuma stub, $(( mx / 1024 )) KB)"; continue
+        fi
+        al=0
+        if grep -rqs --include='*.xml' "package=\"$core\"" \
+               "$P_FS/product/etc/permissions" "$P_FS/system_ext/etc/permissions" "$P_FS/system/system/etc/permissions"; then al=1; fi
+        if [[ $al == 0 && $core != com.google.android.gsf ]]; then bad+=" $core(allowlist privapp tidak ada)"; continue; fi
+        good+=" ${core##*.}=${dl[0]}($(( mx / 1048576 ))MB)"
+    done
+    if [[ -n $bad ]]; then
+        warn "GMS: verifikasi GAGAL:$bad -> login Google / Play Store tidak akan jalan, atau risiko bootloop"
+        return 1
+    fi
+    ok "GMS: terverifikasi:$good"
+    return 0
+}
+
 gms_from_base() {
     local mode=${GMS_FROM_BASE:-auto} scope=${GMS_SCOPE:-core}
     local excl="${GMS_EXCLUDE_DEFAULT}${GMS_EXCLUDE:+|$GMS_EXCLUDE}"
     local pidx="$WORK/gms_port.tsv" bidx="$WORK/gms_base.tsv"
     local re core miss="" base_miss="" pkg dir sz bytes=0 napp=0 ncfg=0 nextra=0 f rel d sub dre
-    local stub_max real newdir other stub_left=""
+    local stub_max real newdir other files
     local -A seen=() seenpkg=()
 
     if [[ $mode == false ]]; then log "GMS: dimatikan (GMS_FROM_BASE=false)"; return 0; fi
@@ -64,8 +99,8 @@ gms_from_base() {
         done < <(awk -F'\t' -v p="$core" '$1 == p {print $2}' "$pidx")
         [[ $real == 0 ]] || continue                      # donor punya yang asli
         if ! gms_pkg_in_index "$core" "$bidx"; then       # stub, dan base tidak punya yang asli
-            warn "GMS: $core di donor cuma stub dan ROM base tidak punya yang asli -> Play Store/login Google tidak akan jalan"
-            stub_left+=" $core"; continue
+            log "GMS: $core di donor cuma stub dan ROM base tidak punya yang asli"
+            continue
         fi
         if [[ $real == 0 ]]; then
             while IFS= read -r d; do
@@ -82,7 +117,8 @@ gms_from_base() {
     done
 
     if [[ $mode == auto && -z $miss ]]; then
-        ok "GMS: donor sudah punya gms, gsf, dan Play Store -> tidak perlu salin dari base"
+        log "GMS: donor sudah punya gms, gsf, dan Play Store -> tidak perlu salin dari base"
+        gms_verify || true
         return 0
     fi
     if [[ -n $miss ]]; then
@@ -112,11 +148,19 @@ gms_from_base() {
         newdir=$dir
         if [[ -e $P_FS/$dir ]]; then
             other=$(awk -F'\t' -v d="$dir" '$2 == d {print $1; exit}' "$pidx")
-            newdir="${dir}Google"
-            if [[ -e $P_FS/$newdir ]]; then
-                warn "GMS: $dir dan $newdir sudah ada di donor, $pkg dilewati"; continue
+            files=$(find "$P_FS/$dir" -maxdepth 2 -printf '%P:%s ' 2>/dev/null || true)
+            sz=$(du -sb "$P_FS/$dir" | cut -f1)
+            if [[ -z $other ]] && (( sz < stub_max )); then
+                # folder kosong / APK kecil yang tidak terbaca = sisa stub ROM China -> dibuang, GMS pakai nama aslinya
+                log "GMS: $dir di donor tidak berisi app terbaca ($(( sz / 1024 )) KB; isi: ${files:0:300}) -> dibuang, $pkg dipasang di nama itu"
+                rm -rf "${P_FS:?}/$dir"
+            else
+                newdir="${dir}Google"
+                if [[ -e $P_FS/$newdir ]]; then
+                    warn "GMS: $dir dan $newdir sudah ada di donor, $pkg dilewati"; continue
+                fi
+                log "GMS: $dir dipakai di donor (package: ${other:-tidak terbaca}; $(( sz / 1024 )) KB; isi: ${files:0:300}) -> $pkg dipasang di $newdir"
             fi
-            log "GMS: $dir dipakai package lain di donor (${other:-?}) -> $pkg dipasang di $newdir"
         fi
         mkdir -p "$P_FS/$(dirname "$newdir")"
         cp -a "$B_FS/$dir" "$P_FS/$newdir"
@@ -157,7 +201,7 @@ gms_from_base() {
 
     ok "GMS: $napp app ($(( bytes / 1048576 )) MB), $ncfg file konfigurasi, $nextra overlay/framework disalin dari base"
 
-    # ---- cek ulang
+    # ---- verifikasi akhir (nyata: ada, bukan stub, tidak dobel, allowlist ada)
     python3 "$SCRIPT_DIR/apk_index.py" "$P_FS" > "$pidx"
     miss=""
     for core in $GMS_CORE_PKGS; do
@@ -165,10 +209,8 @@ gms_from_base() {
     done
     if [[ -n $miss ]]; then
         warn "GMS: setelah disalin masih tidak ada:$miss -> login Google / Play Store tidak akan jalan"
-    elif [[ -n $stub_left ]]; then
-        log "GMS: masih stub (bukan yang asli):$stub_left"
     else
-        ok "GMS: gms, gsf, dan Play Store sekarang ada di ROM port"
+        gms_verify || true
     fi
 }
 
