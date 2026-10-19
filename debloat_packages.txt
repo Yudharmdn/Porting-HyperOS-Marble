@@ -73,10 +73,10 @@ com.miui.carlink                              | Car with Mi
 
 # Opsional Xiaomi - ada fitur yang hilang, hapus tanda '#' kalau mau:
 # com.duokan.phone.remotecontroller           | Mi Remote (IR blaster) - JANGAN dihapus kalau pakai remote IR
-com.miui.contentcatcher                     | Content Catcher (saran konten; App Vault/rekomendasi)
-com.miui.catcherpatch                       | pasangan Content Catcher
+# com.miui.contentcatcher                     | Content Catcher (saran konten; App Vault/rekomendasi)
+# com.miui.catcherpatch                       | pasangan Content Catcher
 com.xiaomi.aiasst.service                    | AI Translation / caption panggilan
-com.miui.cit                                | hardware test (CIT), hanya kode dial servis
+# com.miui.cit                                | hardware test (CIT), hanya kode dial servis
 # com.miui.tsmclient                          | Mi Pay NFC - JANGAN dihapus kalau pakai pembayaran NFC Xiaomi
 
 # ---- Facebook
