@@ -46,12 +46,13 @@ images/vendor_boot.img    patched (fstab)
 images/dtbo.img
 images/vbmeta.img, vbmeta_system.img
 images/cust.img
-images/super.img.0 ... super.img.8   super partition split into 9 chunks
+images/super.img          the whole super partition as one raw image
 ```
 
 A few things are done this way on purpose:
 
 - **recovery.img is not included**, so the OrangeFox on your phone stays untouched.
+- **super is one file.** The xiaomi.eu installer normally writes super from 9 sparse chunks; here it is a single raw `images/super.img` streamed straight to the partition. `SUPER_SINGLE: "false"` brings back the chunks.
 - **The installer only flashes.** Any format or wipe command in META-INF is neutralized during the build, and if one somehow slips through, the build fails on purpose.
 
 ## Building
@@ -196,7 +197,7 @@ scripts/jar_smali_patch.py           patches SystemServerImpl in miui-services.j
 scripts/vintf_check.py               checks VINTF, vendor vs framework
 scripts/linker_check.py              checks the libraries vendor needs
 scripts/installer_sanitize.py        makes sure the installer never wipes data
-scripts/sparse_split.py              splits super into super.img.0..8
+scripts/sparse_split.py              splits super into super.img.0..N (only with SUPER_SINGLE=false)
 scripts/apk_index.py                 reads package names from APKs
 scripts/apk_static_lib.py            reads static shared library info (Trichrome) from an APK
 scripts/apk_bundle.py                unpacks an .apkm/.apks/.xapk bundle (base + splits)

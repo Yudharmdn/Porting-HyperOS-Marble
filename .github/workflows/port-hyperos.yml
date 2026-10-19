@@ -101,6 +101,7 @@ env:
   MILLET_FIX: "true"           # ro.millet.netlink disamakan dengan marble
   INSTALLER: base               # base = pakai META-INF ROM base (xiaomi.eu) | ours = installer buatan script
   RECOVERY_SUPER: raw          # hanya INSTALLER=ours. Mode base: super mengikuti layout zip base (super.img.0..8 sparse)
+  SUPER_SINGLE: "true"         # installer xiaomi.eu: images/super.img tunggal (raw) | false = super.img.0..8 seperti zip base
   # boot.img custom (kernel melt-rebase) menggantikan boot.img base; kosongkan untuk pakai boot base
   BOOT_IMG: "https://github.com/Yudharmdn/boot-melt-rebase/releases/download/boot-melt-rebase/boot.img"
   # Gboard sebagai keyboard sistem (product/app/LatinImeGoogle); kosongkan untuk tidak menambah

@@ -5,7 +5,7 @@
 #  Konsep: firmware + boot/vendor_boot/dtbo + vendor/odm/vendor_dlkm dari BASE
 #  (ROM marble, mis. xiaomi.eu), system/system_ext/product/mi_ext dari PORT (donor).
 #  Output: zip flashable recovery (META-INF/ + images/), untuk OrangeFox/TWRP.
-#  INSTALLER=base: META-INF & layout images/super.img.N disamakan dengan zip base.
+#  INSTALLER=base: META-INF dari zip base; super = images/super.img tunggal (SUPER_SINGLE=false: .0..N seperti base).
 #
 #  Semua partisi bisa EXT4 + rw lewat EXT4_PARTITIONS (termasuk product, mi_ext,
 #  vendor_dlkm). Supaya muat di super: EXT4_HEADROOM_MB kecil (default 32),
@@ -45,6 +45,7 @@ PROP_MERGE=${PROP_MERGE:-true}             # salin props khas device dari produc
 OVERLAY_FIX=${OVERLAY_FIX:-true}           # buang overlay khas donor, salin overlay khas marble
 INSTALLER=${INSTALLER:-auto}                # auto | base (META-INF dari ROM base, mis. xiaomi.eu) | ours
 RECOVERY_SUPER=${RECOVERY_SUPER:-raw}      # hanya INSTALLER=ours: raw = images/super.img | zst = images/super.img.zst
+SUPER_SINGLE=${SUPER_SINGLE:-true}         # INSTALLER=base: true = images/super.img tunggal (raw) | false = super.img.0..N seperti zip base
 RECOVERY_IMG=${RECOVERY_IMG:-}              # opsional: URL/path recovery.img custom (OrangeFox dll)
 BOOT_IMG=${BOOT_IMG:-}                      # opsional: URL/path boot.img custom (kernel), menggantikan boot.img base
 GBOARD_APK=${GBOARD_APK:-}                  # opsional: URL/path Gboard (LatinImeGoogle.apk) -> jadi keyboard sistem
@@ -1471,6 +1472,39 @@ match_super_layout() { # pkg
     fi
 }
 
+# installer base menulis super dari potongan super.img.0..N (sparse). Diganti satu baris:
+# images/super.img raw lewat package_extract_file (stream langsung ke blok, tanpa unsparse).
+installer_single_super() { # pkg
+    local us="$1/META-INF/com/google/android/updater-script" res
+    [[ -f $us ]] || die "SUPER_SINGLE: updater-script base tidak ada"
+    res=$(python3 - "$us" <<'PY'
+import re, sys
+p = sys.argv[1]
+lines = open(p, encoding="utf-8").read().split("\n")
+pat = re.compile(r'^\s*package_(?:unsparse|extract)_file\(\s*"images/super\.img(?:\.\d+)?"\s*,\s*"([^"]+)"\s*\)\s*;\s*$')
+out, n = [], 0
+for line in lines:
+    m = pat.match(line)
+    if m:
+        n += 1
+        if n == 1:
+            out.append('package_extract_file("images/super.img", "%s");' % m.group(1))
+        continue
+    out.append(line)
+left = [l for l in out if re.search(r'super\.img\.\d', l) and not l.lstrip().startswith(("#", "ui_print"))]
+if n == 0 or left:
+    print("ERR %d %s" % (n, " | ".join(left)[:300]))
+    sys.exit(0)
+open(p, "w", encoding="utf-8").write("\n".join(out))
+print("OK %d" % n)
+PY
+)
+    case $res in
+        OK*) ok "installer: ${res#OK } baris flash super.img.N -> 1 baris images/super.img (raw, package_extract_file)" ;;
+        *)   die "SUPER_SINGLE: baris flash super di updater-script base tidak dikenali (${res#ERR }). Set SUPER_SINGLE=false" ;;
+    esac
+}
+
 # hapus perintah flash recovery.img dari installer base (recovery HP dipertahankan)
 strip_recovery_refs() { # pkg
     local pkg=$1 f changed
@@ -1562,6 +1596,12 @@ apply_base_installer() { # pkg
     # file yang dirujuk (teks updater-script + string di update-binary)
     ref=$( { [[ -f $us ]] && cat "$us"; strings -n 6 "$ub" 2>/dev/null; } \
         | grep -oE '(images|firmware-update)/[A-Za-z0-9_.+-]+' | sort -u || true)
+    # SUPER_SINGLE: potongan super.img.N yang hanya muncul sebagai string di biner update-binary diabaikan
+    if is_true "$SUPER_SINGLE" && grep -qE '^images/super\.img\.[0-9]+$' <<< "$ref"; then
+        if [[ -f $us ]] && grep -qE 'super\.img\.[0-9]' "$us"; then die "SUPER_SINGLE: updater-script masih merujuk super.img.N"; fi
+        warn "installer: update-binary memuat nama super.img.N (bukan dari updater-script), diabaikan karena SUPER_SINGLE=true"
+        ref=$(grep -vE '^images/super\.img\.[0-9]+$' <<< "$ref" || true)
+    fi
     for f in $ref; do
         n=$((n + 1))
         if [[ ! -e $pkg/$f ]]; then
@@ -1842,7 +1882,7 @@ main() {
     mkdir -p "$pkg/images"
     mode=$(installer_mode)
     log "installer: $mode"
-    if [[ $mode == base ]]; then SUPER_SPARSE=true; fi
+    if [[ $mode == base ]] && ! is_true "$SUPER_SINGLE"; then SUPER_SPARSE=true; fi
     build_super "$super_list" "$pkg/images/super.img"
     rm -rf "$OUT_IMG_TMP"
     group_end
@@ -1863,8 +1903,9 @@ main() {
         log "recovery.img tidak dimasukkan (recovery di HP tidak ditimpa)"
     fi
     if [[ $mode == base ]]; then
-        match_super_layout "$pkg"
+        if ! is_true "$SUPER_SINGLE"; then match_super_layout "$pkg"; fi
         rm -rf "$pkg/META-INF"; cp -a "$WORK/base_META-INF" "$pkg/META-INF"
+        if is_true "$SUPER_SINGLE"; then installer_single_super "$pkg"; fi
         if [[ -z $RECOVERY_IMG ]]; then strip_recovery_refs "$pkg"; fi
         apply_base_installer "$pkg"
         installer_branding "$pkg" "$port_ver"
